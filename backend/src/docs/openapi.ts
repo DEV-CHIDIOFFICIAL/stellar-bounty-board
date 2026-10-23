@@ -131,13 +131,33 @@ registry.registerPath({
     "and auth configuration (MAINTAINER_PUBLIC_KEY and ARBITER_ADDRESS). " +
     "Each component check has a configurable timeout via DEEP_HEALTH_CHECK_TIMEOUT_MS " +
     "(default 5000 ms); a timed-out component is reported as down. " +
-    "Excluded from rate limiting. Returns HTTP 503 when any critical component is down.",
+    "Limited to 10 requests per minute per IP by default (configurable with " +
+    "RATE_LIMIT_DEEP_HEALTH_MAX and RATE_LIMIT_DEEP_HEALTH_WINDOW_MS). " +
+    "Returns HTTP 503 when any critical component is down.",
   responses: {
     200: jsonResponse("All critical components are healthy.", deepHealthResponseSchema),
     400: jsonResponse(
       "Invalid input: the route accepts no path parameters, query string, or request body.",
       errorResponseSchema
     ),
+    429: {
+      description: "Rate limit exceeded. Retry after the number of seconds in Retry-After.",
+      headers: {
+        "Retry-After": {
+          description: "Seconds to wait before retrying.",
+          schema: { type: "string" },
+        },
+      },
+      content: {
+        "application/json": {
+          schema: z.object({
+            error: z.string(),
+            retryAfter: z.number(),
+            requestId: z.string().optional(),
+          }),
+        },
+      },
+    },
     503: jsonResponse("One or more critical components are down.", deepHealthResponseSchema),
   },
 });

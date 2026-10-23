@@ -37,6 +37,10 @@ export interface AppConfig {
   rateLimitHealthMax: number;
   /** Rate limit window in milliseconds for health check endpoint (default: 60000 = 1 minute). */
   rateLimitHealthWindowMs: number;
+  /** Maximum deep health check requests per window (default: 10). */
+  rateLimitDeepHealthMax: number;
+  /** Rate limit window in milliseconds for deep health check endpoint (default: 60000 = 1 minute). */
+  rateLimitDeepHealthWindowMs: number;
   /** Maximum bounty creation requests per window (default: 10). */
   rateLimitCreateMax: number;
   /** Rate limit window in milliseconds for bounty creation endpoint (default: 60000 = 1 minute). */
@@ -92,6 +96,11 @@ export function getAppConfig(): AppConfig {
     rateLimitBountiesWindowMs: parsePositiveInt(process.env.RATE_LIMIT_BOUNTIES_WINDOW_MS, 60_000),
     rateLimitHealthMax: parsePositiveInt(process.env.RATE_LIMIT_HEALTH_MAX, 300),
     rateLimitHealthWindowMs: parsePositiveInt(process.env.RATE_LIMIT_HEALTH_WINDOW_MS, 60_000),
+    rateLimitDeepHealthMax: parsePositiveInt(process.env.RATE_LIMIT_DEEP_HEALTH_MAX, 10),
+    rateLimitDeepHealthWindowMs: parsePositiveInt(
+      process.env.RATE_LIMIT_DEEP_HEALTH_WINDOW_MS,
+      60_000
+    ),
     rateLimitCreateMax: parsePositiveInt(
       process.env.RATE_LIMIT_CREATE_MAX ?? process.env.RATE_LIMIT_BOUNTY_CREATE_MAX,
       10

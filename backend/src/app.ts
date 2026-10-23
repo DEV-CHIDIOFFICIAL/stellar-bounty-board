@@ -156,7 +156,8 @@ const readLimiter = rateLimit({
       (req.path === '/api/open-issues' ||
         req.path.endsWith('/open-issues') ||
         req.path === '/api/bounties' ||
-        req.path === '/api/bounties/')
+        req.path === '/api/bounties/' ||
+        req.path === '/api/health/deep')
     ),
 });
 
@@ -440,6 +441,35 @@ export const healthLimiter = rateLimit({
   },
 });
 
+/**
+ * Route-specific explicit rate limiter for GET /api/health/deep (#1184).
+ *
+ * Cost justification:
+ * Each check probes the filesystem by creating, reading, and deleting a temporary file,
+ * and sends an outbound Soroban RPC request that can wait up to the configured component
+ * timeout. A ceiling of 10 requests per minute per IP allows a probe every six seconds
+ * while bounding unauthenticated disk and RPC work. Operators can tune it with
+ * RATE_LIMIT_DEEP_HEALTH_MAX and RATE_LIMIT_DEEP_HEALTH_WINDOW_MS.
+ *
+ * When the limit is exceeded, HTTP 429 is returned with an explicit Retry-After header.
+ */
+export const deepHealthLimiter = rateLimit({
+  windowMs: appConfig.rateLimitDeepHealthWindowMs,
+  max: appConfig.rateLimitDeepHealthMax,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test' && process.env.RATE_LIMIT_TEST_MODE !== 'true',
+  handler: (req: Request, res: Response) => {
+    const retryAfter = Math.ceil(appConfig.rateLimitDeepHealthWindowMs / 1000);
+    res.setHeader('Retry-After', String(retryAfter));
+    res.status(429).json({
+      error: 'Too many deep health check requests. Please try again later.',
+      retryAfter,
+      requestId: req.requestId,
+    });
+  },
+});
+
 // Apply read limiter to all GET requests
 app.use((req: any, res: any, next: any) => {
   if (req.method === 'GET') return readLimiter(req, res, next);
@@ -516,27 +546,32 @@ app.get('/api/health', healthLimiter, idempotencyMiddleware, healthHandler);
  * rejected here with HTTP 400 and the `HEALTH_DEEP_INVALID_INPUT` error code
  * rather than surfacing as a confusing downstream failure.
  */
-app.get('/api/health/deep', idempotencyMiddleware, async (req: Request, res: Response) => {
-  const result = healthInputSchema.safeParse({
-    params: req.params,
-    query: req.query,
-    body: req.body,
-  });
-
-  if (!result.success) {
-    res.status(400).json({
-      error: 'Invalid input for deep health endpoint.',
-      code: 'HEALTH_DEEP_INVALID_INPUT',
-      details: result.error.issues,
-      requestId: req.requestId,
+app.get(
+  '/api/health/deep',
+  deepHealthLimiter,
+  idempotencyMiddleware,
+  async (req: Request, res: Response) => {
+    const result = healthInputSchema.safeParse({
+      params: req.params,
+      query: req.query,
+      body: req.body,
     });
-    return;
-  }
 
-  const health = await runDeepHealthCheck();
-  const statusCode = health.overall === 'up' ? 200 : 503;
-  res.status(statusCode).json(health);
-});
+    if (!result.success) {
+      res.status(400).json({
+        error: 'Invalid input for deep health endpoint.',
+        code: 'HEALTH_DEEP_INVALID_INPUT',
+        details: result.error.issues,
+        requestId: req.requestId,
+      });
+      return;
+    }
+
+    const health = await runDeepHealthCheck();
+    const statusCode = health.overall === 'up' ? 200 : 503;
+    res.status(statusCode).json(health);
+  }
+);
 
 app.get('/worker/health', (_req: Request, res: Response) => {
   res.json({
